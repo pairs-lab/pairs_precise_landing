@@ -1,0 +1,67 @@
+# what controller will be used for the landing
+controller: "Se3Controller"
+
+# what tracker will be used for the landing
+tracker: "MpcTracker"
+
+# the frame in which all the operations are conducted
+# (all the incoming data is transformed to this frame first)
+frame_id: "fixed_origin"
+
+desired_heading:
+
+  relative_to_pad:
+    enabled: true
+    heading: 0.0 # [rad]
+
+stages:
+
+  aligning:
+    speed: 0.5    # [m/s]
+    height: 1.5   # [m]
+    radius: 0.2   # [m]
+    timeout: 10.0 # [s]
+
+  descending:
+    speed: 0.5    # [m/s]
+    height: 1.0   # [m]
+    timeout: 10.0 # [s]
+
+  aligning2:
+
+    timeout: 15.0 # [s]
+
+    # the alignment criterion is relaxed as the time goes
+    criterion:
+
+      initial_radius: 0.03         # [m], +-
+      radius_increase_rate: 0.005  # [m/s]
+      limit_radius: 0.08           # [m/s]
+
+    in_alignment_duration: 0.5 # [s]
+
+  landing:
+    speed: 0.5          # [m/s]
+    height: -1.0        # [m], this is relative to the tracker_cmdk
+    repeat_threshold: 2 # [-]
+
+    disarming:
+      mass_factor: 0.75   # [-] mass factor for landing detection
+
+      vision:
+        enabled: false
+        distance: 0.1 # [m]
+
+  repeating:
+    height: 1.5 # [m]
+    speed: 1.5 # [m/s]
+    timeout: 10.0 # [m]
+
+  aborting:
+    height: 1.5 # [m]
+
+# rate of the feedback loop
+rate: 10.0 # [Hz]
+
+# sampling rate of the outcoming trajectory
+trajectory_dt: 0.20 # [s]
