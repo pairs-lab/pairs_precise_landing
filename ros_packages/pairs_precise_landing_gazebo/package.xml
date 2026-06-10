@@ -1,23 +1,15 @@
 <?xml version="1.0"?>
-<package format="2">
-
+<package format="3">
   <name>pairs_precise_landing_gazebo</name>
-  <version>1.0.0</version>
-  <description>pairs_precise_landing_gazebo</description>
-
+  <version>2.0.0</version>
+  <description>PAIRS precise landing Gazebo simulation resources (models, worlds)</description>
   <maintainer email="canhthanh@vnu.edu.vn">Thanh Nguyen Canh</maintainer>
   <author email="canhthanh@vnu.edu.vn">Thanh Nguyen Canh</author>
-
   <license>MIT</license>
-
-  <buildtool_depend>catkin</buildtool_depend>
-
-  <depend>gazebo_ros</depend>
-
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <exec_depend>ros_gz_sim</exec_depend>
   <export>
-    <gazebo_ros gazebo_model_path="${prefix}/models"/>
-    <gazebo_ros gazebo_media_path="${prefix}"/>
-    <gazebo_ros plugin_path="${prefix}/lib"/>
+    <build_type>ament_cmake</build_type>
+    <gazebo_ros gazebo_model_path="${prefix}/share/pairs_precise_landing_gazebo/models"/>
   </export>
-
 </package>

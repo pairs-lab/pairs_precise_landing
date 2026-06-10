@@ -1,31 +1,12 @@
-cmake_minimum_required(VERSION 3.5)
+cmake_minimum_required(VERSION 3.20.0)
 project(pairs_precise_landing_gazebo)
 
-set(CATKIN_DEPENDENCIES
-  gazebo_ros
-  )
+find_package(ament_cmake REQUIRED)
 
-find_package(catkin REQUIRED COMPONENTS
-  ${CATKIN_DEPENDENCIES}
-)
+install(DIRECTORY models  DESTINATION share/${PROJECT_NAME})
+install(DIRECTORY worlds  DESTINATION share/${PROJECT_NAME})
+install(DIRECTORY tmux    USE_SOURCE_PERMISSIONS DESTINATION share/${PROJECT_NAME})
 
-catkin_package(
-  CATKIN_DEPENDS ${CATKIN_DEPENDENCIES}
-)
+# expose the gazebo model path to gz
 
-## --------------------------------------------------------------
-## |                           Install                          |
-## --------------------------------------------------------------
-
-install(DIRECTORY models/
-  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/models
-  )
-
-install(DIRECTORY worlds/
-  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/worlds
-  )
-
-install(DIRECTORY tmux/
-  USE_SOURCE_PERMISSIONS
-  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/tmux
-  )
+ament_package()

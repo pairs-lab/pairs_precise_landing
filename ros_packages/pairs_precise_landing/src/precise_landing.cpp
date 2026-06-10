@@ -1,7 +1,16 @@
 /* include //{ */
 
-#include <ros/ros.h>
-#include <nodelet/nodelet.h>
+#include <memory>
+#include <mutex>
+#include <atomic>
+#include <optional>
+#include <string>
+#include <sstream>
+#include <cmath>
+
+#include <rclcpp/rclcpp.hpp>
+
+#include <Eigen/Eigen>
 
 #include <pairs_lib/param_loader.h>
 #include <pairs_lib/mutex.h>
@@ -10,23 +19,27 @@
 #include <pairs_lib/geometry/misc.h>
 #include <pairs_lib/geometry/cyclic.h>
 #include <pairs_lib/attitude_converter.h>
-#include <pairs_lib/subscribe_handler.h>
+#include <pairs_lib/subscriber_handler.h>
 #include <pairs_lib/publisher_handler.h>
 #include <pairs_lib/service_client_handler.h>
+#include <pairs_lib/service_server_handler.h>
+#include <pairs_lib/node.h>
 
-#include <std_srvs/Trigger.h>
-#include <std_srvs/SetBool.h>
-#include <std_msgs/Float64.h>
+#include <std_srvs/srv/trigger.hpp>
+#include <std_srvs/srv/set_bool.hpp>
+#include <std_msgs/msg/float64.hpp>
 
-#include <geometry_msgs/PoseWithCovarianceStamped.h>
+#include <geometry_msgs/msg/pose_with_covariance_stamped.hpp>
 
-#include <pairs_msgs/TrajectoryReference.h>
-#include <pairs_msgs/TrackerCommand.h>
-#include <pairs_msgs/UavState.h>
-#include <pairs_msgs/String.h>
-#include <pairs_msgs/PathSrv.h>
-#include <pairs_msgs/ControlManagerDiagnostics.h>
-#include <pairs_msgs/Float64StampedSrv.h>
+#include <pairs_msgs/msg/trajectory_reference.hpp>
+#include <pairs_msgs/msg/tracker_command.hpp>
+#include <pairs_msgs/msg/uav_state.hpp>
+#include <pairs_msgs/msg/reference.hpp>
+#include <pairs_msgs/msg/reference_stamped.hpp>
+#include <pairs_msgs/msg/control_manager_diagnostics.hpp>
+#include <pairs_msgs/srv/string.hpp>
+#include <pairs_msgs/srv/path_srv.hpp>
+#include <pairs_msgs/srv/float64_stamped_srv.hpp>
 
 //}
 
@@ -80,14 +93,18 @@ const char *state_names[7] = {
 
 /* class PreciseLanding //{ */
 
-class PreciseLanding : public nodelet::Nodelet {
+class PreciseLanding : public pairs_lib::Node {
 
 public:
-  virtual void onInit();
-  bool         is_initialized_ = false;
+  PreciseLanding(rclcpp::NodeOptions options);
+
+  bool is_initialized_ = false;
 
 private:
-  ros::NodeHandle nh_;
+  rclcpp::Node::SharedPtr  node_;
+  rclcpp::Clock::SharedPtr clock_;
+
+  void initialize();
 
   std::string _uav_name_;
 
@@ -95,27 +112,27 @@ private:
 
   std::unique_ptr<pairs_lib::Transformer> transformer_;
 
-  pairs_lib::PublisherHandler<pairs_msgs::TrajectoryReference> ph_trajectory_reference_;
+  pairs_lib::PublisherHandler<pairs_msgs::msg::TrajectoryReference> ph_trajectory_reference_;
 
-  pairs_lib::SubscribeHandler<pairs_msgs::TrackerCommand>                 sh_tracker_cmd_;
-  pairs_lib::SubscribeHandler<geometry_msgs::PoseWithCovarianceStamped> sh_landing_pad_;
-  pairs_lib::SubscribeHandler<pairs_msgs::UavState>                       sh_uav_state_;
-  pairs_lib::SubscribeHandler<std_msgs::Float64>                        sh_mass_estimate_;
-  pairs_lib::SubscribeHandler<pairs_msgs::ControlManagerDiagnostics>      sh_ctrl_diag_;
+  pairs_lib::SubscriberHandler<pairs_msgs::msg::TrackerCommand>                   sh_tracker_cmd_;
+  pairs_lib::SubscriberHandler<geometry_msgs::msg::PoseWithCovarianceStamped>     sh_landing_pad_;
+  pairs_lib::SubscriberHandler<pairs_msgs::msg::UavState>                         sh_uav_state_;
+  pairs_lib::SubscriberHandler<std_msgs::msg::Float64>                            sh_mass_estimate_;
+  pairs_lib::SubscriberHandler<pairs_msgs::msg::ControlManagerDiagnostics>        sh_ctrl_diag_;
 
-  void callbackTimeoutPad(const std::string &topic_name, const ros::Time &last_msg);
+  void callbackTimeoutPad(const std::string &topic_name, const rclcpp::Time &last_msg);
 
-  void callbackLandingPad(const geometry_msgs::PoseWithCovarianceStamped::ConstPtr msg);
+  void callbackLandingPad(const geometry_msgs::msg::PoseWithCovarianceStamped::ConstSharedPtr msg);
 
-  ros::ServiceServer service_server_land_;
-  ros::ServiceServer service_servcer_stop_;
+  pairs_lib::ServiceServerHandler<std_srvs::srv::Trigger> service_server_land_;
+  pairs_lib::ServiceServerHandler<std_srvs::srv::Trigger> service_server_stop_;
 
-  pairs_lib::ServiceClientHandler<pairs_msgs::String>            sch_switch_controller_;
-  pairs_lib::ServiceClientHandler<pairs_msgs::String>            sch_switch_tracker_;
-  pairs_lib::ServiceClientHandler<std_srvs::SetBool>           sch_arming_;
-  pairs_lib::ServiceClientHandler<pairs_msgs::Float64StampedSrv> sch_set_min_z;
-  pairs_lib::ServiceClientHandler<std_srvs::SetBool>           sch_enable_min_height_check_;
-  pairs_lib::ServiceClientHandler<pairs_msgs::PathSrv>           sch_path_;
+  pairs_lib::ServiceClientHandler<pairs_msgs::srv::String>            sch_switch_controller_;
+  pairs_lib::ServiceClientHandler<pairs_msgs::srv::String>            sch_switch_tracker_;
+  pairs_lib::ServiceClientHandler<std_srvs::srv::SetBool>             sch_arming_;
+  pairs_lib::ServiceClientHandler<pairs_msgs::srv::Float64StampedSrv> sch_set_min_z;
+  pairs_lib::ServiceClientHandler<std_srvs::srv::SetBool>             sch_enable_min_height_check_;
+  pairs_lib::ServiceClientHandler<pairs_msgs::srv::PathSrv>           sch_path_;
 
   // params loaded from config file
   double _trajectory_dt_;
@@ -124,7 +141,7 @@ private:
 
   std::atomic<bool> see_landing_pad_ = false;
 
-  ros::Time timeouter_;
+  rclcpp::Time timeouter_;
 
   std::string controller_;
   std::string tracker_;
@@ -152,12 +169,12 @@ private:
 
   double _aligning2_in_alignment_duration_;
 
-  ros::Time aligning2_in_radius_time_;
-  bool      aligning2_in_radius_ = false;
-  double    aligning2_current_radius_;
+  rclcpp::Time aligning2_in_radius_time_;
+  bool         aligning2_in_radius_ = false;
+  double       aligning2_current_radius_;
 
   // landing params
-  ros::Time landing_since_;
+  rclcpp::Time landing_since_;
 
   double _landing_speed_;
   double _landing_height_;
@@ -174,8 +191,8 @@ private:
   // aborting params
   double aborting_height_;
 
-  bool callbackLand(std_srvs::Trigger::Request &req, std_srvs::Trigger::Response &res);
-  bool callbackAbort(std_srvs::Trigger::Request &req, std_srvs::Trigger::Response &res);
+  bool callbackLand(const std::shared_ptr<std_srvs::srv::Trigger::Request> req, const std::shared_ptr<std_srvs::srv::Trigger::Response> res);
+  bool callbackAbort(const std::shared_ptr<std_srvs::srv::Trigger::Request> req, const std::shared_ptr<std_srvs::srv::Trigger::Response> res);
 
   bool setController(const std::string &desired_controller);
 
@@ -193,11 +210,11 @@ private:
 
   bool shouldTimeout(const double &timeout);
 
-  std::optional<pairs_msgs::ReferenceStamped> getTransformedTrackerCmd(const std::string &frame_id);
+  std::optional<pairs_msgs::msg::ReferenceStamped> getTransformedTrackerCmd(const std::string &frame_id);
 
-  std::optional<pairs_msgs::ReferenceStamped> getTransformedLandingPad(const std::string &frame_id);
+  std::optional<pairs_msgs::msg::ReferenceStamped> getTransformedLandingPad(const std::string &frame_id);
 
-  std::optional<pairs_msgs::ReferenceStamped> getTransformedUavState(const std::string &frame_id);
+  std::optional<pairs_msgs::msg::ReferenceStamped> getTransformedUavState(const std::string &frame_id);
 
   // state machine
   int        current_state_, previous_state_;
@@ -205,28 +222,34 @@ private:
 
   int repeat_landing_counter;
 
-  ros::Timer state_machine_timer_;
-  void       stateMachineTimer(const ros::TimerEvent &event);
+  rclcpp::TimerBase::SharedPtr state_machine_timer_;
+  void                         stateMachineTimer();
 
 public:
   double _main_rate_;
 
   void changeState(int newState);
 
-  std::optional<pairs_msgs::TrajectoryReference> createTrajectory(int trajectoryType);
+  std::optional<pairs_msgs::msg::TrajectoryReference> createTrajectory(int trajectoryType);
 };
 
 //}
 
-/* onInit() //{ */
+/* PreciseLanding() //{ */
 
-void PreciseLanding::onInit() {
+PreciseLanding::PreciseLanding(rclcpp::NodeOptions options) : pairs_lib::Node("PreciseLanding", options) {
+  node_  = this_node_ptr();
+  clock_ = node_->get_clock();
+  initialize();
+}
 
-  nh_ = nodelet::Nodelet::getMTPrivateNodeHandle();
+//}
 
-  pairs_lib::ParamLoader param_loader(nh_, "PreciseLanding");
+/* initialize() //{ */
 
-  ros::Time::waitForValid();
+void PreciseLanding::initialize() {
+
+  pairs_lib::ParamLoader param_loader(node_, "PreciseLanding");
 
   param_loader.loadParam("uav_name", _uav_name_);
 
@@ -279,62 +302,61 @@ void PreciseLanding::onInit() {
   param_loader.loadParam("stages/aborting/height", aborting_height_);
 
   if (!param_loader.loadedSuccessfully()) {
-    ROS_ERROR("[PreciseLanding]: [PreciseLanding]: Could not load all parameters!");
-    ros::shutdown();
+    RCLCPP_ERROR(node_->get_logger(), "[PreciseLanding]: Could not load all parameters!");
+    rclcpp::shutdown();
+    return;
   }
 
-  transformer_ = std::make_unique<pairs_lib::Transformer>("PreciseLanding");
+  transformer_ = std::make_unique<pairs_lib::Transformer>(node_);
   transformer_->setDefaultPrefix(_uav_name_);
   transformer_->retryLookupNewest(true);
 
   // | ----------------------- publishers ----------------------- |
 
-  ph_trajectory_reference_ = pairs_lib::PublisherHandler<pairs_msgs::TrajectoryReference>(nh_, "trajectory_reference_out", 10);
+  ph_trajectory_reference_ = pairs_lib::PublisherHandler<pairs_msgs::msg::TrajectoryReference>(node_, "~/trajectory_reference_out");
 
   // | --------------------- service clients -------------------- |
 
-  sch_switch_controller_       = pairs_lib::ServiceClientHandler<pairs_msgs::String>(nh_, "switch_controller_out");
-  sch_switch_tracker_          = pairs_lib::ServiceClientHandler<pairs_msgs::String>(nh_, "switch_tracker_out");
-  sch_arming_                  = pairs_lib::ServiceClientHandler<std_srvs::SetBool>(nh_, "arming_out");
-  sch_set_min_z                = pairs_lib::ServiceClientHandler<pairs_msgs::Float64StampedSrv>(nh_, "set_min_z_out");
-  sch_enable_min_height_check_ = pairs_lib::ServiceClientHandler<std_srvs::SetBool>(nh_, "enable_min_height_check_out");
-  sch_path_                    = pairs_lib::ServiceClientHandler<pairs_msgs::PathSrv>(nh_, "path_out");
+  sch_switch_controller_       = pairs_lib::ServiceClientHandler<pairs_msgs::srv::String>(node_, "~/switch_controller_out");
+  sch_switch_tracker_          = pairs_lib::ServiceClientHandler<pairs_msgs::srv::String>(node_, "~/switch_tracker_out");
+  sch_arming_                  = pairs_lib::ServiceClientHandler<std_srvs::srv::SetBool>(node_, "~/arming_out");
+  sch_set_min_z                = pairs_lib::ServiceClientHandler<pairs_msgs::srv::Float64StampedSrv>(node_, "~/set_min_z_out");
+  sch_enable_min_height_check_ = pairs_lib::ServiceClientHandler<std_srvs::srv::SetBool>(node_, "~/enable_min_height_check_out");
+  sch_path_                    = pairs_lib::ServiceClientHandler<pairs_msgs::srv::PathSrv>(node_, "~/path_out");
 
-  // | --------------------- sercice servers -------------------- |
+  // | --------------------- service servers -------------------- |
 
-  service_server_land_  = nh_.advertiseService("land_in", &PreciseLanding::callbackLand, this);
-  service_servcer_stop_ = nh_.advertiseService("abort_in", &PreciseLanding::callbackAbort, this);
+  service_server_land_ = pairs_lib::ServiceServerHandler<std_srvs::srv::Trigger>(
+      node_, "~/land_in", std::bind(&PreciseLanding::callbackLand, this, std::placeholders::_1, std::placeholders::_2));
+  service_server_stop_ = pairs_lib::ServiceServerHandler<std_srvs::srv::Trigger>(
+      node_, "~/abort_in", std::bind(&PreciseLanding::callbackAbort, this, std::placeholders::_1, std::placeholders::_2));
 
   // | ----------------------- subscribers ---------------------- |
 
   {
-    pairs_lib::SubscribeHandlerOptions shopts;
-    shopts.nh                 = nh_;
+    pairs_lib::SubscriberHandlerOptions shopts;
+    shopts.node               = node_;
     shopts.node_name          = "PreciseLanding";
-    shopts.no_message_timeout = ros::Duration(1.0);
+    shopts.no_message_timeout = rclcpp::Duration::from_seconds(1.0);
     shopts.threadsafe         = true;
     shopts.autostart          = true;
-    shopts.queue_size         = 10;
-    shopts.transport_hints    = ros::TransportHints().tcpNoDelay();
 
-    sh_landing_pad_ = pairs_lib::SubscribeHandler<geometry_msgs::PoseWithCovarianceStamped>(shopts, "landing_pad_in", &PreciseLanding::callbackLandingPad, this,
-                                                                                          &PreciseLanding::callbackTimeoutPad, this);
+    sh_landing_pad_ = pairs_lib::SubscriberHandler<geometry_msgs::msg::PoseWithCovarianceStamped>(
+        shopts, "~/landing_pad_in", &PreciseLanding::callbackLandingPad, this, &PreciseLanding::callbackTimeoutPad, this);
   }
 
   {
-    pairs_lib::SubscribeHandlerOptions shopts;
-    shopts.nh                 = nh_;
+    pairs_lib::SubscriberHandlerOptions shopts;
+    shopts.node               = node_;
     shopts.node_name          = "PreciseLanding";
     shopts.no_message_timeout = pairs_lib::no_timeout;
     shopts.threadsafe         = true;
     shopts.autostart          = true;
-    shopts.queue_size         = 10;
-    shopts.transport_hints    = ros::TransportHints().tcpNoDelay();
 
-    sh_tracker_cmd_   = pairs_lib::SubscribeHandler<pairs_msgs::TrackerCommand>(shopts, "tracker_cmd_in");
-    sh_uav_state_     = pairs_lib::SubscribeHandler<pairs_msgs::UavState>(shopts, "uav_state_in");
-    sh_mass_estimate_ = pairs_lib::SubscribeHandler<std_msgs::Float64>(shopts, "mass_estimate_in");
-    sh_ctrl_diag_     = pairs_lib::SubscribeHandler<pairs_msgs::ControlManagerDiagnostics>(shopts, "ctrl_diag_in");
+    sh_tracker_cmd_   = pairs_lib::SubscriberHandler<pairs_msgs::msg::TrackerCommand>(shopts, "~/tracker_cmd_in");
+    sh_uav_state_     = pairs_lib::SubscriberHandler<pairs_msgs::msg::UavState>(shopts, "~/uav_state_in");
+    sh_mass_estimate_ = pairs_lib::SubscriberHandler<std_msgs::msg::Float64>(shopts, "~/mass_estimate_in");
+    sh_ctrl_diag_     = pairs_lib::SubscriberHandler<pairs_msgs::msg::ControlManagerDiagnostics>(shopts, "~/ctrl_diag_in");
   }
 
   // state machine
@@ -344,11 +366,12 @@ void PreciseLanding::onInit() {
   // | ------------------------- timers ------------------------- |
 
   // start timers
-  state_machine_timer_ = nh_.createTimer(ros::Rate(_main_rate_), &PreciseLanding::stateMachineTimer, this);
+  state_machine_timer_ = node_->create_wall_timer(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::duration<double>(1.0 / _main_rate_)),
+                                                  std::bind(&PreciseLanding::stateMachineTimer, this));
 
   is_initialized_ = true;
 
-  ROS_INFO("[PreciseLanding]: initialized");
+  RCLCPP_INFO(node_->get_logger(), "[PreciseLanding]: initialized");
 }
 
 //}
@@ -357,9 +380,9 @@ void PreciseLanding::onInit() {
 
 /* callbackLandingPad() //{ */
 
-void PreciseLanding::callbackLandingPad(const geometry_msgs::PoseWithCovarianceStamped::ConstPtr msg) {
+void PreciseLanding::callbackLandingPad([[maybe_unused]] const geometry_msgs::msg::PoseWithCovarianceStamped::ConstSharedPtr msg) {
 
-  ROS_INFO_ONCE("[PreciseLanding]: getting landing pad pose");
+  RCLCPP_INFO_ONCE(node_->get_logger(), "[PreciseLanding]: getting landing pad pose");
 
   see_landing_pad_ = true;
 }
@@ -368,7 +391,7 @@ void PreciseLanding::callbackLandingPad(const geometry_msgs::PoseWithCovarianceS
 
 /* callbackTimeoutPad() //{ */
 
-void PreciseLanding::callbackTimeoutPad([[maybe_unused]] const std::string &topic_name, [[maybe_unused]] const ros::Time &last_msg) {
+void PreciseLanding::callbackTimeoutPad([[maybe_unused]] const std::string &topic_name, [[maybe_unused]] const rclcpp::Time &last_msg) {
 
   see_landing_pad_ = false;
 }
@@ -377,12 +400,13 @@ void PreciseLanding::callbackTimeoutPad([[maybe_unused]] const std::string &topi
 
 // | ------------------------ services ------------------------ |
 
-/* callbackStop() //{ */
+/* callbackAbort() //{ */
 
-bool PreciseLanding::callbackAbort([[maybe_unused]] std_srvs::Trigger::Request &req, std_srvs::Trigger::Response &res) {
+bool PreciseLanding::callbackAbort([[maybe_unused]] const std::shared_ptr<std_srvs::srv::Trigger::Request> req,
+                                   const std::shared_ptr<std_srvs::srv::Trigger::Response>                  res) {
 
-  res.success = true;
-  res.message = "aborting landing";
+  res->success = true;
+  res->message = "aborting landing";
 
   {
     std::scoped_lock lock(mutex_state_);
@@ -397,64 +421,65 @@ bool PreciseLanding::callbackAbort([[maybe_unused]] std_srvs::Trigger::Request &
 
 /* callbackLand() //{ */
 
-bool PreciseLanding::callbackLand(std_srvs::Trigger::Request &req, std_srvs::Trigger::Response &res) {
+bool PreciseLanding::callbackLand([[maybe_unused]] const std::shared_ptr<std_srvs::srv::Trigger::Request> req,
+                                  const std::shared_ptr<std_srvs::srv::Trigger::Response>                  res) {
 
   {
     std::stringstream ss;
 
     if (!sh_uav_state_.hasMsg()) {
       ss << "missing UAV state";
-      ROS_ERROR_STREAM_THROTTLE(1.0, "[PreciseLanding]: " << ss.str());
-      res.message = ss.str();
-      res.success = false;
+      RCLCPP_ERROR_STREAM_THROTTLE(node_->get_logger(), *clock_, 1000, "[PreciseLanding]: " << ss.str());
+      res->message = ss.str();
+      res->success = false;
       return true;
     }
 
     if (!sh_landing_pad_.hasMsg()) {
       ss << "missing landing pad detections";
-      ROS_ERROR_STREAM_THROTTLE(1.0, "[PreciseLanding]: " << ss.str());
-      res.message = ss.str();
-      res.success = false;
+      RCLCPP_ERROR_STREAM_THROTTLE(node_->get_logger(), *clock_, 1000, "[PreciseLanding]: " << ss.str());
+      res->message = ss.str();
+      res->success = false;
       return true;
     }
 
     if (!sh_tracker_cmd_.hasMsg()) {
       ss << "missing tracker cmd";
-      ROS_ERROR_STREAM_THROTTLE(1.0, "[PreciseLanding]: " << ss.str());
-      res.message = ss.str();
-      res.success = false;
+      RCLCPP_ERROR_STREAM_THROTTLE(node_->get_logger(), *clock_, 1000, "[PreciseLanding]: " << ss.str());
+      res->message = ss.str();
+      res->success = false;
       return true;
     }
 
     if (!sh_mass_estimate_.hasMsg()) {
       ss << "missing estimated mass";
-      ROS_ERROR_STREAM_THROTTLE(1.0, "[PreciseLanding]: " << ss.str());
-      res.message = ss.str();
-      res.success = false;
+      RCLCPP_ERROR_STREAM_THROTTLE(node_->get_logger(), *clock_, 1000, "[PreciseLanding]: " << ss.str());
+      res->message = ss.str();
+      res->success = false;
       return true;
     }
 
     if (!sh_ctrl_diag_.hasMsg()) {
       ss << "missing control manager diagnostics";
-      ROS_ERROR_STREAM_THROTTLE(1.0, "[PreciseLanding]: " << ss.str());
-      res.message = ss.str();
-      res.success = false;
+      RCLCPP_ERROR_STREAM_THROTTLE(node_->get_logger(), *clock_, 1000, "[PreciseLanding]: " << ss.str());
+      res->message = ss.str();
+      res->success = false;
       return true;
     }
 
     if (!sh_ctrl_diag_.getMsg()->flying_normally) {
       ss << "not flying normally";
-      ROS_ERROR_STREAM_THROTTLE(1.0, "[PreciseLanding]: " << ss.str());
-      res.message = ss.str();
-      res.success = false;
+      RCLCPP_ERROR_STREAM_THROTTLE(node_->get_logger(), *clock_, 1000, "[PreciseLanding]: " << ss.str());
+      res->message = ss.str();
+      res->success = false;
       return true;
     }
 
     if (!see_landing_pad_) {
       ss << "landing pad not detected";
-      ROS_ERROR_STREAM_THROTTLE(1.0, "[PreciseLanding]: " << ss.str());
-      res.message = ss.str();
-      res.success = false;
+      RCLCPP_ERROR_STREAM_THROTTLE(node_->get_logger(), *clock_, 1000, "[PreciseLanding]: " << ss.str());
+      res->message = ss.str();
+      res->success = false;
       return true;
     }
   }
@@ -466,13 +491,13 @@ bool PreciseLanding::callbackLand(std_srvs::Trigger::Request &req, std_srvs::Tri
 
       changeState(ALIGN_STATE);
 
-      res.success = true;
-      res.message = "landing has started";
+      res->success = true;
+      res->message = "landing has started";
 
     } else {
 
-      res.success = false;
-      res.message = "landing already in process";
+      res->success = false;
+      res->message = "landing already in process";
     }
   }
 
@@ -489,13 +514,13 @@ bool PreciseLanding::callbackLand(std_srvs::Trigger::Request &req, std_srvs::Tri
 
 void PreciseLanding::changeState(int newState) {
 
-  // just for ROS_INFO
-  ROS_INFO("[PreciseLanding]: Switching states: %s -> %s", state_names[current_state_], state_names[newState]);
+  // just for the info log
+  RCLCPP_INFO(node_->get_logger(), "[PreciseLanding]: Switching states: %s -> %s", state_names[current_state_], state_names[newState]);
 
   previous_state_ = current_state_;
   current_state_  = newState;
 
-  timeouter_ = ros::Time::now();
+  timeouter_ = clock_->now();
 
   // if changing to idle, stop the drone
   switch (newState) {
@@ -516,19 +541,19 @@ void PreciseLanding::changeState(int newState) {
     case ALIGN_STATE: {
 
       if (!setController(controller_)) {
-        ROS_ERROR("[PreciseLanding]: failed to switch controller");
+        RCLCPP_ERROR(node_->get_logger(), "[PreciseLanding]: failed to switch controller");
         changeState(IDLE_STATE);
         return;
       }
 
       if (!setTracker(tracker_)) {
-        ROS_ERROR("[PreciseLanding]: failed to switch tracker");
+        RCLCPP_ERROR(node_->get_logger(), "[PreciseLanding]: failed to switch tracker");
         changeState(IDLE_STATE);
         return;
       }
 
       if (!enableMinHeightCheck(false)) {
-        ROS_ERROR("[PreciseLanding]: failed to disable the min height check");
+        RCLCPP_ERROR(node_->get_logger(), "[PreciseLanding]: failed to disable the min height check");
         changeState(IDLE_STATE);
         return;
       }
@@ -555,7 +580,7 @@ void PreciseLanding::changeState(int newState) {
 
     case ALIGN2_STATE: {
 
-      aligning2_in_radius_time_ = ros::Time(0);
+      aligning2_in_radius_time_ = rclcpp::Time(0, 0, clock_->get_clock_type());
       aligning2_in_radius_      = false;
       aligning2_current_radius_ = _aligning2_criterion_initial_radius_;
 
@@ -569,7 +594,7 @@ void PreciseLanding::changeState(int newState) {
     case LANDING_STATE: {
 
       // log when we started the landing
-      landing_since_ = ros::Time::now();
+      landing_since_ = clock_->now();
 
       break;
     }
@@ -582,7 +607,7 @@ void PreciseLanding::changeState(int newState) {
 
       if (repeat_landing_counter++ >= _landing_repeat_threshold_) {
 
-        ROS_INFO("[PreciseLanding]: Exceeded the number of landing attempts, aborting");
+        RCLCPP_INFO(node_->get_logger(), "[PreciseLanding]: Exceeded the number of landing attempts, aborting");
 
         changeState(ABORT_STATE);
       }
@@ -596,7 +621,7 @@ void PreciseLanding::changeState(int newState) {
 
     case ABORT_STATE: {
 
-      ROS_DEBUG("[PreciseLanding]: aborting");
+      RCLCPP_DEBUG(node_->get_logger(), "[PreciseLanding]: aborting");
 
       break;
     }
@@ -609,7 +634,7 @@ void PreciseLanding::changeState(int newState) {
 
 /* createTrajectory() //{ */
 
-std::optional<pairs_msgs::TrajectoryReference> PreciseLanding::createTrajectory(int trajectoryType) {
+std::optional<pairs_msgs::msg::TrajectoryReference> PreciseLanding::createTrajectory(int trajectoryType) {
 
   auto tracker_cmd = getTransformedTrackerCmd(_frame_id_);
   auto landing_pad = getTransformedLandingPad(_frame_id_);
@@ -628,10 +653,8 @@ std::optional<pairs_msgs::TrajectoryReference> PreciseLanding::createTrajectory(
   double landing_pad_z   = landing_pad->reference.position.z;
   double landing_pad_hdg = landing_pad->reference.heading;
 
-  // prepare the trajectorie
-  // pose array for debugging
-  pairs_msgs::TrajectoryReference trajectory;
-  tf::Quaternion                orientation;
+  // prepare the trajectory
+  pairs_msgs::msg::TrajectoryReference trajectory;
   trajectory.fly_now     = true;
   trajectory.use_heading = true;
   trajectory.header      = tracker_cmd->header;
@@ -658,7 +681,7 @@ std::optional<pairs_msgs::TrajectoryReference> PreciseLanding::createTrajectory(
 
     // the first point
     {
-      pairs_msgs::Reference point;
+      pairs_msgs::msg::Reference point;
 
       point.position.x = landing_pad_x;
       point.position.y = landing_pad_y;
@@ -671,7 +694,7 @@ std::optional<pairs_msgs::TrajectoryReference> PreciseLanding::createTrajectory(
 
     // sample the trajectory
     {
-      pairs_msgs::Reference point;
+      pairs_msgs::msg::Reference point;
 
       for (int i = 0; i < n_steps; i++) {
 
@@ -686,7 +709,7 @@ std::optional<pairs_msgs::TrajectoryReference> PreciseLanding::createTrajectory(
 
     // the last point
     {
-      pairs_msgs::Reference point;
+      pairs_msgs::msg::Reference point;
 
       point.position.x = landing_pad_x;
       point.position.y = landing_pad_y;
@@ -719,7 +742,7 @@ std::optional<pairs_msgs::TrajectoryReference> PreciseLanding::createTrajectory(
 
     // the first point
     {
-      pairs_msgs::Reference point;
+      pairs_msgs::msg::Reference point;
 
       point.position.x = landing_pad_x;
       point.position.y = landing_pad_y;
@@ -731,7 +754,7 @@ std::optional<pairs_msgs::TrajectoryReference> PreciseLanding::createTrajectory(
 
     // sample the trajectory
     {
-      pairs_msgs::Reference point;
+      pairs_msgs::msg::Reference point;
 
       for (int i = 0; i < n_steps; i++) {
 
@@ -746,7 +769,7 @@ std::optional<pairs_msgs::TrajectoryReference> PreciseLanding::createTrajectory(
 
     // the last point
     {
-      pairs_msgs::Reference point;
+      pairs_msgs::msg::Reference point;
 
       point.position.x = landing_pad_x;
       point.position.y = landing_pad_y;
@@ -782,7 +805,7 @@ std::optional<pairs_msgs::TrajectoryReference> PreciseLanding::createTrajectory(
 
     // the first point
     {
-      pairs_msgs::Reference point;
+      pairs_msgs::msg::Reference point;
 
       point.position.x = landing_pad_x;
       point.position.y = landing_pad_y;
@@ -794,7 +817,7 @@ std::optional<pairs_msgs::TrajectoryReference> PreciseLanding::createTrajectory(
 
     // sample the trajectory
     {
-      pairs_msgs::Reference point;
+      pairs_msgs::msg::Reference point;
 
       for (int i = 0; i < n_steps; i++) {
 
@@ -809,7 +832,7 @@ std::optional<pairs_msgs::TrajectoryReference> PreciseLanding::createTrajectory(
 
     // the last point
     {
-      pairs_msgs::Reference point;
+      pairs_msgs::msg::Reference point;
 
       point.position.x = landing_pad_x;
       point.position.y = landing_pad_y;
@@ -827,7 +850,7 @@ std::optional<pairs_msgs::TrajectoryReference> PreciseLanding::createTrajectory(
 
   } else if (trajectoryType == ABORT_TRAJECTORY) {
 
-    pairs_msgs::Reference point;
+    pairs_msgs::msg::Reference point;
 
     point.position.x = init_x;
     point.position.y = init_y;
@@ -852,20 +875,22 @@ std::optional<pairs_msgs::TrajectoryReference> PreciseLanding::createTrajectory(
 
 bool PreciseLanding::setController(const std::string &desired_controller) {
 
-  pairs_msgs::String srv;
-  srv.request.value = desired_controller;
+  auto request   = std::make_shared<pairs_msgs::srv::String::Request>();
+  request->value = desired_controller;
 
-  ROS_INFO("[PreciseLanding]: switching to controller: \"%s\"", desired_controller.c_str());
+  RCLCPP_INFO(node_->get_logger(), "[PreciseLanding]: switching to controller: \"%s\"", desired_controller.c_str());
 
-  bool res = sch_switch_controller_.call(srv);
+  // TODO(ros2): verify ServiceClientHandler API
+  auto res = sch_switch_controller_.callSync(request);
 
   if (res) {
-    if (!srv.response.success) {
-      ROS_WARN_THROTTLE(1.0, "[PreciseLanding]: service call for setController() returned false: %s", srv.response.message.c_str());
+    if (!(*res)->success) {
+      RCLCPP_WARN_THROTTLE(node_->get_logger(), *clock_, 1000, "[PreciseLanding]: service call for setController() returned false: %s",
+                           (*res)->message.c_str());
       return false;
     }
   } else {
-    ROS_ERROR("[PreciseLanding]: service call for setController() failed!");
+    RCLCPP_ERROR(node_->get_logger(), "[PreciseLanding]: service call for setController() failed!");
     return false;
   }
 
@@ -878,20 +903,21 @@ bool PreciseLanding::setController(const std::string &desired_controller) {
 
 bool PreciseLanding::setTracker(const std::string &desired_tracker) {
 
-  pairs_msgs::String srv;
-  srv.request.value = desired_tracker;
+  auto request   = std::make_shared<pairs_msgs::srv::String::Request>();
+  request->value = desired_tracker;
 
-  ROS_INFO("[PreciseLanding]: switching to tracker: \"%s\"", desired_tracker.c_str());
+  RCLCPP_INFO(node_->get_logger(), "[PreciseLanding]: switching to tracker: \"%s\"", desired_tracker.c_str());
 
-  bool res = sch_switch_tracker_.call(srv);
+  // TODO(ros2): verify ServiceClientHandler API
+  auto res = sch_switch_tracker_.callSync(request);
 
   if (res) {
-    if (!srv.response.success) {
-      ROS_WARN_THROTTLE(1.0, "[PreciseLanding]: service call for setTracker() returned false: %s", srv.response.message.c_str());
+    if (!(*res)->success) {
+      RCLCPP_WARN_THROTTLE(node_->get_logger(), *clock_, 1000, "[PreciseLanding]: service call for setTracker() returned false: %s", (*res)->message.c_str());
       return false;
     }
   } else {
-    ROS_ERROR("[PreciseLanding]: service call for setTracker() failed!");
+    RCLCPP_ERROR(node_->get_logger(), "[PreciseLanding]: service call for setTracker() failed!");
     return false;
   }
 
@@ -904,18 +930,18 @@ bool PreciseLanding::setTracker(const std::string &desired_tracker) {
 
 void PreciseLanding::disarm(void) {
 
-  std_srvs::SetBool srv;
+  auto request  = std::make_shared<std_srvs::srv::SetBool::Request>();
+  request->data = false;
 
-  srv.request.data = false;
-
-  bool res = sch_arming_.call(srv);
+  // TODO(ros2): verify ServiceClientHandler API
+  auto res = sch_arming_.callSync(request);
 
   if (res) {
-    if (!srv.response.success) {
-      ROS_WARN_THROTTLE(1.0, "[PreciseLanding]: service call for disarm() returned false: %s", srv.response.message.c_str());
+    if (!(*res)->success) {
+      RCLCPP_WARN_THROTTLE(node_->get_logger(), *clock_, 1000, "[PreciseLanding]: service call for disarm() returned false: %s", (*res)->message.c_str());
     }
   } else {
-    ROS_ERROR("[PreciseLanding]: service call for disarm() failed!");
+    RCLCPP_ERROR(node_->get_logger(), "[PreciseLanding]: service call for disarm() failed!");
   }
 }
 
@@ -925,19 +951,20 @@ void PreciseLanding::disarm(void) {
 
 bool PreciseLanding::setMinZ(const double z) {
 
-  pairs_msgs::Float64StampedSrv srv;
-  srv.request.header.frame_id = _frame_id_;
-  srv.request.value           = z;
+  auto request                 = std::make_shared<pairs_msgs::srv::Float64StampedSrv::Request>();
+  request->header.frame_id     = _frame_id_;
+  request->value               = z;
 
-  bool res = sch_set_min_z.call(srv);
+  // TODO(ros2): verify ServiceClientHandler API
+  auto res = sch_set_min_z.callSync(request);
 
   if (res) {
-    if (!srv.response.success) {
-      ROS_WARN_THROTTLE(1.0, "[PreciseLanding]: service call for setMinZ() returned false: %s", srv.response.message.c_str());
+    if (!(*res)->success) {
+      RCLCPP_WARN_THROTTLE(node_->get_logger(), *clock_, 1000, "[PreciseLanding]: service call for setMinZ() returned false: %s", (*res)->message.c_str());
       return false;
     }
   } else {
-    ROS_ERROR("[PreciseLanding]: service call for setMinZ() failed!");
+    RCLCPP_ERROR(node_->get_logger(), "[PreciseLanding]: service call for setMinZ() failed!");
     return false;
   }
 
@@ -950,20 +977,22 @@ bool PreciseLanding::setMinZ(const double z) {
 
 bool PreciseLanding::enableMinHeightCheck(const bool state) {
 
-  std_srvs::SetBool srv;
-  srv.request.data = state;
+  auto request  = std::make_shared<std_srvs::srv::SetBool::Request>();
+  request->data = state;
 
-  ROS_INFO("[PreciseLanding]: %s min height check", state ? "enabling" : "disabling");
+  RCLCPP_INFO(node_->get_logger(), "[PreciseLanding]: %s min height check", state ? "enabling" : "disabling");
 
-  bool res = sch_enable_min_height_check_.call(srv);
+  // TODO(ros2): verify ServiceClientHandler API
+  auto res = sch_enable_min_height_check_.callSync(request);
 
   if (res) {
-    if (!srv.response.success) {
-      ROS_WARN_THROTTLE(1.0, "[PreciseLanding]: service call for enableMinHeightCheck() returned false: %s", srv.response.message.c_str());
+    if (!(*res)->success) {
+      RCLCPP_WARN_THROTTLE(node_->get_logger(), *clock_, 1000, "[PreciseLanding]: service call for enableMinHeightCheck() returned false: %s",
+                           (*res)->message.c_str());
       return false;
     }
   } else {
-    ROS_ERROR("[PreciseLanding]: service call for enableMinHeightCheck() failed!");
+    RCLCPP_ERROR(node_->get_logger(), "[PreciseLanding]: service call for enableMinHeightCheck() failed!");
     return false;
   }
 
@@ -976,37 +1005,38 @@ bool PreciseLanding::enableMinHeightCheck(const bool state) {
 
 void PreciseLanding::gotoPath(const double x, const double y, const double z, const double hdg, const std::string &frame) {
 
-  pairs_msgs::PathSrv srv;
-  srv.request.path.fly_now                 = true;
-  srv.request.path.header.frame_id         = frame;
-  srv.request.path.max_execution_time      = 0.9;
-  srv.request.path.max_deviation_from_path = 0.5;
-  srv.request.path.use_heading             = true;
+  auto request                                      = std::make_shared<pairs_msgs::srv::PathSrv::Request>();
+  request->path.fly_now                             = true;
+  request->path.header.frame_id                     = frame;
+  request->path.max_execution_time                  = 0.9;
+  request->path.max_deviation_from_path             = 0.5;
+  request->path.use_heading                         = true;
 
-  srv.request.path.override_constraints                 = true;
-  srv.request.path.override_max_acceleration_vertical   = 2.0;
-  srv.request.path.override_max_acceleration_horizontal = 2.0;
-  srv.request.path.override_max_velocity_vertical       = _aligning_speed_;
-  srv.request.path.override_max_velocity_horizontal     = _aligning_speed_;
-  srv.request.path.override_max_jerk_vertical           = 20.0;
-  srv.request.path.override_max_jerk_horizontal         = 20.0;
+  request->path.override_constraints                = true;
+  request->path.override_max_acceleration_vertical  = 2.0;
+  request->path.override_max_acceleration_horizontal = 2.0;
+  request->path.override_max_velocity_vertical      = _aligning_speed_;
+  request->path.override_max_velocity_horizontal    = _aligning_speed_;
+  request->path.override_max_jerk_vertical          = 20.0;
+  request->path.override_max_jerk_horizontal        = 20.0;
 
-  pairs_msgs::Reference point;
+  pairs_msgs::msg::Reference point;
   point.position.x = x;
   point.position.y = y;
   point.position.z = z;
   point.heading    = hdg;
 
-  srv.request.path.points.push_back(point);
+  request->path.points.push_back(point);
 
-  bool res = sch_path_.call(srv);
+  // TODO(ros2): verify ServiceClientHandler API
+  auto res = sch_path_.callSync(request);
 
   if (res) {
-    if (!srv.response.success) {
-      ROS_WARN_THROTTLE(1.0, "[PreciseLanding]: service call for gotoPath() returned false: %s", srv.response.message.c_str());
+    if (!(*res)->success) {
+      RCLCPP_WARN_THROTTLE(node_->get_logger(), *clock_, 1000, "[PreciseLanding]: service call for gotoPath() returned false: %s", (*res)->message.c_str());
     }
   } else {
-    ROS_ERROR("[PreciseLanding]: service call for gotoPath() failed!");
+    RCLCPP_ERROR(node_->get_logger(), "[PreciseLanding]: service call for gotoPath() failed!");
   }
 }
 
@@ -1018,11 +1048,11 @@ void PreciseLanding::gotoPath(const double x, const double y, const double z, co
 
 bool PreciseLanding::shouldTimeout(const double &timeout) {
 
-  if (timeouter_ == ros::Time::UNINITIALIZED) {
+  if (timeouter_.nanoseconds() == 0) {
     return false;
   }
 
-  if ((ros::Time::now() - timeouter_).toSec() > timeout) {
+  if ((clock_->now() - timeouter_).seconds() > timeout) {
     return true;
   } else {
     return false;
@@ -1033,7 +1063,7 @@ bool PreciseLanding::shouldTimeout(const double &timeout) {
 
 /* getTransformedTrackerCmd() //{ */
 
-std::optional<pairs_msgs::ReferenceStamped> PreciseLanding::getTransformedTrackerCmd(const std::string &frame_id) {
+std::optional<pairs_msgs::msg::ReferenceStamped> PreciseLanding::getTransformedTrackerCmd([[maybe_unused]] const std::string &frame_id) {
 
   if (!sh_tracker_cmd_.hasMsg()) {
     return {};
@@ -1041,7 +1071,7 @@ std::optional<pairs_msgs::ReferenceStamped> PreciseLanding::getTransformedTracke
 
   auto tracker_cmd = sh_tracker_cmd_.getMsg();
 
-  pairs_msgs::ReferenceStamped out;
+  pairs_msgs::msg::ReferenceStamped out;
 
   {
     out.header             = tracker_cmd->header;
@@ -1053,7 +1083,7 @@ std::optional<pairs_msgs::ReferenceStamped> PreciseLanding::getTransformedTracke
     if (result) {
       out = result.value();
     } else {
-      ROS_ERROR("[PreciseLanding]: could not transform tracker cmd to '%s'", _frame_id_.c_str());
+      RCLCPP_ERROR(node_->get_logger(), "[PreciseLanding]: could not transform tracker cmd to '%s'", _frame_id_.c_str());
       return {};
     }
   }
@@ -1065,7 +1095,7 @@ std::optional<pairs_msgs::ReferenceStamped> PreciseLanding::getTransformedTracke
 
 /* getTransformedLandingPad() //{ */
 
-std::optional<pairs_msgs::ReferenceStamped> PreciseLanding::getTransformedLandingPad(const std::string &frame_id) {
+std::optional<pairs_msgs::msg::ReferenceStamped> PreciseLanding::getTransformedLandingPad([[maybe_unused]] const std::string &frame_id) {
 
   if (!sh_landing_pad_.hasMsg()) {
     return {};
@@ -1073,7 +1103,7 @@ std::optional<pairs_msgs::ReferenceStamped> PreciseLanding::getTransformedLandin
 
   auto landing_pad = sh_landing_pad_.getMsg();
 
-  pairs_msgs::ReferenceStamped out;
+  pairs_msgs::msg::ReferenceStamped out;
 
   {
     out.header             = landing_pad->header;
@@ -1085,7 +1115,7 @@ std::optional<pairs_msgs::ReferenceStamped> PreciseLanding::getTransformedLandin
     if (result) {
       out = result.value();
     } else {
-      ROS_ERROR("[PreciseLanding]: could not transform landing pad to '%s'", _frame_id_.c_str());
+      RCLCPP_ERROR(node_->get_logger(), "[PreciseLanding]: could not transform landing pad to '%s'", _frame_id_.c_str());
       return {};
     }
   }
@@ -1097,7 +1127,7 @@ std::optional<pairs_msgs::ReferenceStamped> PreciseLanding::getTransformedLandin
 
 /* getTransformedUavState() //{ */
 
-std::optional<pairs_msgs::ReferenceStamped> PreciseLanding::getTransformedUavState(const std::string &frame_id) {
+std::optional<pairs_msgs::msg::ReferenceStamped> PreciseLanding::getTransformedUavState([[maybe_unused]] const std::string &frame_id) {
 
   if (!sh_uav_state_.hasMsg()) {
     return {};
@@ -1105,7 +1135,7 @@ std::optional<pairs_msgs::ReferenceStamped> PreciseLanding::getTransformedUavSta
 
   auto uav_state = sh_uav_state_.getMsg();
 
-  pairs_msgs::ReferenceStamped out;
+  pairs_msgs::msg::ReferenceStamped out;
 
   {
     out.header             = uav_state->header;
@@ -1115,9 +1145,9 @@ std::optional<pairs_msgs::ReferenceStamped> PreciseLanding::getTransformedUavSta
     auto result = transformer_->transformSingle(out, _frame_id_);
 
     if (result) {
-      result = result.value();
+      out = result.value();
     } else {
-      ROS_ERROR("[PreciseLanding]: could not transform UAV state to '%s'", _frame_id_.c_str());
+      RCLCPP_ERROR(node_->get_logger(), "[PreciseLanding]: could not transform UAV state to '%s'", _frame_id_.c_str());
       return {};
     }
   }
@@ -1175,7 +1205,7 @@ bool PreciseLanding::alignmentCheck(const double &desired_height, const double &
 
 /* stateMachineTimer() //{ */
 
-void PreciseLanding::stateMachineTimer([[maybe_unused]] const ros::TimerEvent &event) {
+void PreciseLanding::stateMachineTimer() {
 
   if (!is_initialized_) {
     return;
@@ -1183,9 +1213,9 @@ void PreciseLanding::stateMachineTimer([[maybe_unused]] const ros::TimerEvent &e
 
   std::scoped_lock lock(mutex_state_);
 
-  ROS_INFO_ONCE("[PreciseLanding]: stateMachineTimer() running");
+  RCLCPP_INFO_ONCE(node_->get_logger(), "[PreciseLanding]: stateMachineTimer() running");
 
-  // | ------- check for nor normal flying for all states ------- |
+  // | ------- check for non normal flying for all states ------- |
 
   if (current_state_ != IDLE_STATE) {
 
@@ -1193,7 +1223,7 @@ void PreciseLanding::stateMachineTimer([[maybe_unused]] const ros::TimerEvent &e
 
     if (!ctrl_diag->flying_normally) {
 
-      ROS_WARN_THROTTLE(1.0, "[PreciseLanding]: not flying normally, aborting");
+      RCLCPP_WARN_THROTTLE(node_->get_logger(), *clock_, 1000, "[PreciseLanding]: not flying normally, aborting");
 
       changeState(IDLE_STATE);
 
@@ -1220,7 +1250,7 @@ void PreciseLanding::stateMachineTimer([[maybe_unused]] const ros::TimerEvent &e
 
       if (shouldTimeout(_aligning_timeout_)) {
 
-        ROS_ERROR("[PreciseLanding]: landing timed out, ABORTING");
+        RCLCPP_ERROR(node_->get_logger(), "[PreciseLanding]: landing timed out, ABORTING");
 
         changeState(ABORT_STATE);
 
@@ -1229,7 +1259,7 @@ void PreciseLanding::stateMachineTimer([[maybe_unused]] const ros::TimerEvent &e
 
       if (!see_landing_pad_) {
 
-        ROS_INFO("[PreciseLanding]: landing pad not visible");
+        RCLCPP_INFO(node_->get_logger(), "[PreciseLanding]: landing pad not visible");
 
         changeState(ABORT_STATE);
 
@@ -1245,7 +1275,7 @@ void PreciseLanding::stateMachineTimer([[maybe_unused]] const ros::TimerEvent &e
       double des_heading;
 
       if (!setMinZ(landing_pad->reference.position.z + 1.5 * _landing_height_)) {
-        ROS_ERROR("[PreciseLanding]: failed to set safety area's min Z");
+        RCLCPP_ERROR(node_->get_logger(), "[PreciseLanding]: failed to set safety area's min Z");
         changeState(ABORT_STATE);
         return;
       }
@@ -1260,7 +1290,7 @@ void PreciseLanding::stateMachineTimer([[maybe_unused]] const ros::TimerEvent &e
 
       if (alignmentCheck(_aligning_height_, _aligning_radius_, 0.2, 0.1)) {
 
-        ROS_INFO_THROTTLE(1, "[PreciseLanding]: aligned with the landing pad, DESCENDING");
+        RCLCPP_INFO_THROTTLE(node_->get_logger(), *clock_, 1000, "[PreciseLanding]: aligned with the landing pad, DESCENDING");
 
         changeState(DESCEND_STATE);
 
@@ -1278,7 +1308,7 @@ void PreciseLanding::stateMachineTimer([[maybe_unused]] const ros::TimerEvent &e
 
       if (shouldTimeout(_descending_timeout_)) {
 
-        ROS_ERROR("[PreciseLanding]: timed out, re-ALIGNING");
+        RCLCPP_ERROR(node_->get_logger(), "[PreciseLanding]: timed out, re-ALIGNING");
 
         changeState(REPEAT_STATE);
 
@@ -1287,7 +1317,7 @@ void PreciseLanding::stateMachineTimer([[maybe_unused]] const ros::TimerEvent &e
 
       if (!see_landing_pad_) {
 
-        ROS_WARN_THROTTLE(1, "[PreciseLanding]: landing pad not visible");
+        RCLCPP_WARN_THROTTLE(node_->get_logger(), *clock_, 1000, "[PreciseLanding]: landing pad not visible");
 
         changeState(ABORT_STATE);
 
@@ -1297,7 +1327,7 @@ void PreciseLanding::stateMachineTimer([[maybe_unused]] const ros::TimerEvent &e
       auto landing_pad = getTransformedLandingPad(_frame_id_);
 
       if (!setMinZ(landing_pad->reference.position.z + 1.5 * _landing_height_)) {
-        ROS_ERROR("[PreciseLanding]: failed to set safety area's min Z");
+        RCLCPP_ERROR(node_->get_logger(), "[PreciseLanding]: failed to set safety area's min Z");
         changeState(ABORT_STATE);
         return;
       }
@@ -1315,7 +1345,7 @@ void PreciseLanding::stateMachineTimer([[maybe_unused]] const ros::TimerEvent &e
 
       if (alignmentCheck(_descending_height_, 0.1, 0.2, 0.1)) {
 
-        ROS_INFO("[PreciseLanding]: correct height reached, ALIGNING for landing");
+        RCLCPP_INFO(node_->get_logger(), "[PreciseLanding]: correct height reached, ALIGNING for landing");
 
         changeState(ALIGN2_STATE);
 
@@ -1333,7 +1363,7 @@ void PreciseLanding::stateMachineTimer([[maybe_unused]] const ros::TimerEvent &e
 
       if (shouldTimeout(_aligning2_timeout_)) {
 
-        ROS_WARN("[PreciseLanding]: Aligning for landing took too long, ABORTING.");
+        RCLCPP_WARN(node_->get_logger(), "[PreciseLanding]: Aligning for landing took too long, ABORTING.");
 
         changeState(ABORT_STATE);
 
@@ -1342,7 +1372,7 @@ void PreciseLanding::stateMachineTimer([[maybe_unused]] const ros::TimerEvent &e
 
       if (!see_landing_pad_) {
 
-        ROS_WARN_THROTTLE(1, "[PreciseLanding]: landing pad not visible");
+        RCLCPP_WARN_THROTTLE(node_->get_logger(), *clock_, 1000, "[PreciseLanding]: landing pad not visible");
 
         changeState(ABORT_STATE);
 
@@ -1352,7 +1382,7 @@ void PreciseLanding::stateMachineTimer([[maybe_unused]] const ros::TimerEvent &e
       auto landing_pad = getTransformedLandingPad(_frame_id_);
 
       if (!setMinZ(landing_pad->reference.position.z + 1.5 * _landing_height_)) {
-        ROS_ERROR("[PreciseLanding]: failed to set safety area's min Z");
+        RCLCPP_ERROR(node_->get_logger(), "[PreciseLanding]: failed to set safety area's min Z");
         changeState(ABORT_STATE);
         return;
       }
@@ -1367,14 +1397,14 @@ void PreciseLanding::stateMachineTimer([[maybe_unused]] const ros::TimerEvent &e
         return;
       }
 
-      ROS_INFO_THROTTLE(1.0, "[PreciseLanding]: alignment radius criterion: %.1f cm", aligning2_current_radius_ * 100.0);
+      RCLCPP_INFO_THROTTLE(node_->get_logger(), *clock_, 1000, "[PreciseLanding]: alignment radius criterion: %.1f cm", aligning2_current_radius_ * 100.0);
 
       if (alignmentCheck(_descending_height_, aligning2_current_radius_, 0.1, 0.1)) {
 
         if (!aligning2_in_radius_) {
 
           aligning2_in_radius_      = true;
-          aligning2_in_radius_time_ = ros::Time::now();
+          aligning2_in_radius_time_ = clock_->now();
         }
 
       } else {
@@ -1388,8 +1418,8 @@ void PreciseLanding::stateMachineTimer([[maybe_unused]] const ros::TimerEvent &e
         if (aligning2_in_radius_) {
 
           aligning2_in_radius_      = false;
-          aligning2_in_radius_time_ = ros::Time(0);
-          ROS_WARN("[PreciseLanding]: alignment disturbed");
+          aligning2_in_radius_time_ = rclcpp::Time(0, 0, clock_->get_clock_type());
+          RCLCPP_WARN(node_->get_logger(), "[PreciseLanding]: alignment disturbed");
         }
       }
 
@@ -1397,11 +1427,11 @@ void PreciseLanding::stateMachineTimer([[maybe_unused]] const ros::TimerEvent &e
 
       if (aligning2_in_radius_) {
 
-        double alignemnt_held_for = (ros::Time::now() - aligning2_in_radius_time_).toSec();
+        double alignemnt_held_for = (clock_->now() - aligning2_in_radius_time_).seconds();
 
         if (alignemnt_held_for > _aligning2_in_alignment_duration_) {
 
-          ROS_INFO("[PreciseLanding]: alignment finished, LANDING");
+          RCLCPP_INFO(node_->get_logger(), "[PreciseLanding]: alignment finished, LANDING");
 
           changeState(LANDING_STATE);
 
@@ -1409,7 +1439,8 @@ void PreciseLanding::stateMachineTimer([[maybe_unused]] const ros::TimerEvent &e
 
         } else {
 
-          ROS_INFO_THROTTLE(0.1, "[PreciseLanding]: alignment holds for %.2f/%.2f s", alignemnt_held_for, _aligning2_in_alignment_duration_);
+          RCLCPP_INFO_THROTTLE(node_->get_logger(), *clock_, 100, "[PreciseLanding]: alignment holds for %.2f/%.2f s", alignemnt_held_for,
+                               _aligning2_in_alignment_duration_);
         }
       }
 
@@ -1425,7 +1456,7 @@ void PreciseLanding::stateMachineTimer([[maybe_unused]] const ros::TimerEvent &e
       auto landing_pad = getTransformedLandingPad(_frame_id_);
 
       if (!setMinZ(landing_pad->reference.position.z + 1.5 * _landing_height_)) {
-        ROS_ERROR("[PreciseLanding]: failed to set safety area's min Z");
+        RCLCPP_ERROR(node_->get_logger(), "[PreciseLanding]: failed to set safety area's min Z");
         changeState(ABORT_STATE);
         return;
       }
@@ -1444,9 +1475,9 @@ void PreciseLanding::stateMachineTimer([[maybe_unused]] const ros::TimerEvent &e
 
       if (estimated_mass->data < (_landing_mass_factor_ * inital_mass_estimate_)) {
 
-        ROS_INFO("[PreciseLanding]: disarming using mass estimator threshold");
+        RCLCPP_INFO(node_->get_logger(), "[PreciseLanding]: disarming using mass estimator threshold");
 
-        ROS_INFO("[PreciseLanding]: landing finished");
+        RCLCPP_INFO(node_->get_logger(), "[PreciseLanding]: landing finished");
 
         disarm();
 
@@ -1457,9 +1488,9 @@ void PreciseLanding::stateMachineTimer([[maybe_unused]] const ros::TimerEvent &e
 
       if (_landing_disarming_vision_enabled_ && alignmentCheck(0.0, 0.1, _landing_disarming_vision_distance_, 1.0)) {
 
-        ROS_INFO("[PreciseLanding]: disarming using vision-based threshold");
+        RCLCPP_INFO(node_->get_logger(), "[PreciseLanding]: disarming using vision-based threshold");
 
-        ROS_INFO("[PreciseLanding]: landing finished");
+        RCLCPP_INFO(node_->get_logger(), "[PreciseLanding]: landing finished");
 
         disarm();
 
@@ -1479,7 +1510,7 @@ void PreciseLanding::stateMachineTimer([[maybe_unused]] const ros::TimerEvent &e
 
       if (shouldTimeout(_repeating_timeout_)) {
 
-        ROS_ERROR("[PreciseLanding]: repeating timed out, ABORTING");
+        RCLCPP_ERROR(node_->get_logger(), "[PreciseLanding]: repeating timed out, ABORTING");
 
         changeState(ABORT_STATE);
 
@@ -1536,5 +1567,5 @@ void PreciseLanding::stateMachineTimer([[maybe_unused]] const ros::TimerEvent &e
 
 }  // namespace pairs_precise_landing
 
-#include <pluginlib/class_list_macros.h>
-PLUGINLIB_EXPORT_CLASS(pairs_precise_landing::PreciseLanding, nodelet::Nodelet)
+#include <rclcpp_components/register_node_macro.hpp>
+RCLCPP_COMPONENTS_REGISTER_NODE(pairs_precise_landing::PreciseLanding)
