@@ -1,7 +1,7 @@
 # pairs_precise_landing
 
 Part of the **PAIRS UAV system** — a faithful rename-port of the CTU-MRS
-`mrs_precise_landing` package.
+`pairs_precise_landing` package.
 
 ## Branches
 - `ros1` — ROS 1 Noetic (catkin)
@@ -13,7 +13,7 @@ sudo apt install ros-noetic-pairs-precise-landing
 ```
 
 ## License
-BSD 3-Clause. Derived from the CTU-MRS `mrs_precise_landing` package; the original
+BSD 3-Clause. Derived from the CTU-MRS `pairs_precise_landing` package; the original
 copyright is retained in [LICENSE](LICENSE).
 
 Maintainer: Thanh Nguyen Canh <canhthanh@vnu.edu.vn>
